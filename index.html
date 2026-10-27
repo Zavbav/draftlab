@@ -126,7 +126,8 @@ for (const [key, positions] of Object.entries(generatedProspects)) {
 }
 
 const endpoints={football:"https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard",basketball:"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",baseball:"https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard",soccer:"https://site.api.espn.com/apis/site/v2/sports/soccer/usa.1/scoreboard"};
-let sport="football",roster=JSON.parse(localStorage.getItem("draftlab-roster")||"[]"),favorite=localStorage.getItem("draftlab-favorite")||sports.football.fav[0],directory=[];
+function safeRead(key,fallback){try{const value=localStorage.getItem(key);return value?JSON.parse(value):fallback}catch(e){return fallback}}
+let sport="football",currentLeague=localStorage.getItem("draftlab-league")||"NFL",roster=safeRead("draftlab-roster",[]),favorite=localStorage.getItem("draftlab-favorite")||sports.football.fav[0],directory=[];
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function save(){localStorage.setItem("draftlab-roster",JSON.stringify(roster))}
 function abbr(s){return s.split(/\s+/).map(w=>w[0]).join("").slice(0,3).toUpperCase()}
@@ -161,7 +162,7 @@ function recordManagerSeason(d){if(d.round<82||!d.playoffs)return;const c=career
 function loadManagerName(){const input=$("manager-name");if(!input)return;input.value=localStorage.getItem("draftlab-manager-name")||"";updateManagerStatus();renderManagerProfile()}function updateManagerStatus(){const input=$("manager-name"),status=$("manager-status");if(!input||!status)return;const name=input.value.trim();status.textContent=name?"Manager "+name+" is running the front office.":"Name your manager and lead your franchise."}function saveManagerName(){const input=$("manager-name");if(!input)return;const name=input.value.trim();if(!name){localStorage.removeItem("draftlab-manager-name");input.value="";updateManagerStatus();renderManagerProfile();toast("Manager name cleared");return}localStorage.setItem("draftlab-manager-name",name);input.value=name;updateManagerStatus();renderManagerProfile();toast("MANAGER HIRED · "+name);logMove("Front office","Manager "+name+" is now leading "+favorite)}
 function initFavorite(){const sets=leagueSets[sport]||[];let league=sets.find(x=>x[0]===currentLeague)||sets[0];currentLeague=league[0];$("league").innerHTML=sets.map(x=>'<option value="'+esc(x[0])+'">'+esc(x[0])+'</option>').join("");$("league").value=currentLeague;let opts=league.slice(1);if(!opts.includes(favorite))favorite=opts[0];$("favorite").innerHTML=opts.map(t=>'<option value="'+esc(t)+'">'+esc(t)+'</option>').join("");$("favorite").value=favorite;$("fav-name").textContent=favorite;$("crest").textContent=abbr(favorite);localStorage.setItem("draftlab-favorite",favorite);localStorage.setItem("draftlab-league",currentLeague)}
 
-let xpState=JSON.parse(localStorage.getItem("draftlab-xp")||'{"xp":0,"claimed":[],"log":[]}');
+let xpState=safeRead("draftlab-xp",{xp:0,claimed:[],log:[]});
 function saveXP(){localStorage.setItem("draftlab-xp",JSON.stringify(xpState))}
 function toast(msg){const t=$("toast");if(!t)return;t.textContent=msg;t.classList.add("show");clearTimeout(window.__draftToast);window.__draftToast=setTimeout(()=>t.classList.remove("show"),2300)}
 function logMove(title,detail){xpState.log.unshift({title,detail,at:new Date().toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})});xpState.log=xpState.log.slice(0,8);saveXP();renderFeed()}
@@ -193,8 +194,8 @@ function sendGM(q){q=q.trim();if(!q)return;$("chat").insertAdjacentHTML("beforee
 const xiShapes={433:[[50,91],[22,73],[42,78],[58,78],[78,73],[30,49],[50,55],[70,49],[22,23],[50,16],[78,23]],442:[[50,91],[22,73],[42,78],[58,78],[78,73],[25,52],[42,55],[58,55],[75,52],[38,23],[62,23]],352:[[50,91],[30,75],[50,79],[70,75],[15,53],[35,50],[50,56],[65,50],[85,53],[38,23],[62,23]]};
 const lineupLimits={football:11,basketball:5,baseball:9,soccer:11};
 const lineupPositions={football:["QB","RB","WR","WR","TE","OL","OL","OL","OL","DL","LB"],basketball:["PG","SG","SF","PF","C"],baseball:["C","1B","2B","3B","SS","OF","OF","OF","P"],soccer:["GK","RB","CB","CB","LB","CM","CM","CM","RW","ST","LW"]};
-let lineups=JSON.parse(localStorage.getItem("draftlab-lineups")||"{}");
-let seasonState=JSON.parse(localStorage.getItem("draftlab-season")||"{}");
+let lineups=safeRead("draftlab-lineups",{});
+let seasonState=safeRead("draftlab-season",{});
 function lineupKey(){return sport+"|"+currentLeague+"|"+favorite}
 function getLineup(){return lineups[lineupKey()]||[]}
 function saveLineup(arr){lineups[lineupKey()]=arr;localStorage.setItem("draftlab-lineups",JSON.stringify(lineups))}
