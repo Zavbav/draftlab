@@ -277,8 +277,92 @@ function getCareerHistory(){return safeRead(careerStoreKey,[])}
 function saveCareerHistory(items){localStorage.setItem(careerStoreKey,JSON.stringify(items))}
 const espnLeaguePaths={"NBA":"basketball/nba","NFL":"football/nfl","WNBA":"basketball/wnba","MLB":"baseball/mlb","MLS":"soccer/usa.1","Premier League":"soccer/eng.1","La Liga":"soccer/esp.1","Bundesliga":"soccer/ger.1","Serie A":"soccer/ita.1","Ligue 1":"soccer/fra.1","NCAA Football":"football/college-football","NCAA Basketball":"basketball/mens-college-basketball","NCAA Baseball":"baseball/college-baseball","NWSL":"soccer/usa.nwsl"};
 function espnTeamSlug(name){return name.toLowerCase().replace(/&/g,"and").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")}
-async function loadSelectedTeamRealRoster(){const path=espnLeaguePaths[currentLeague];if(!path)return false;const key=favorite;try{const slug=espnTeamSlug(key);let data=null;for(const id of [slug,({"Golden State Warriors":"gs","Los Angeles Lakers":"lal","LA Clippers":"lac","New York Knicks":"ny","Boston Celtics":"bos","Kansas City Chiefs":"kc","Philadelphia Eagles":"phi","Dallas Cowboys":"dal","St. Louis Cardinals":"stl","New York Yankees":"nyy","Los Angeles Dodgers":"lad","St. Louis CITY SC":"stl"}[key]||"")].filter(Boolean)){try{const res=await fetch("https://site.api.espn.com/apis/site/v2/sports/"+path+"/teams/"+encodeURIComponent(id)+"/roster");if(res.ok){const d=await res.json();const rows=[];const flatten=x=>{if(Array.isArray(x))x.forEach(flatten);else if(x&&typeof x==="object"){if(x.items&&Array.isArray(x.items))flatten(x.items);else if(x.displayName||x.fullName)rows.push(x)}};flatten(d.athletes||d.team?.athletes||[]);if(rows.length){data=rows;break}}}catch(e){}}if(!data||!data.length)return false;if(key!==favorite||path!==espnLeaguePaths[currentLeague])return false;roster=roster.filter(p=>!(p.sport===sport&&(p.league||currentLeague)===currentLeague));saveLineup([]);data.forEach(a=>{const name=a.displayName||a.fullName;if(!name)return;const pos=a.position?.abbreviation||a.position?.displayName||"Player";const age=a.age||24;const rating=Number(a.overall||a.rating||70);roster.push({name,pos,sport,rating,age,potential:Math.min(99,rating+(age<=24?8:3)),nation:"—",league:currentLeague,team:favorite,salary:Math.max(1,Math.round((rating-55)*.65+2)),source:"ESPN roster",gamesTracked:0,form:50,fatigue:0,injuryGames:0,stats:{games:0,points:0,goals:0,assists:0,rebounds:0,steals:0,blocks:0,passingYards:0,touchdowns:0,rushingYards:0,receivingYards:0,tackles:0,sacks:0,hits:0,homeRuns:0,rbi:0,strikeouts:0,saves:0}})});save();renderRoster();renderStartingXI();renderBudget();renderSeason();return true}catch(e){return false}}
-function seedRealTeamRoster(force=false){const teamMap=realTeamPlayers[currentLeague]||realTeamPlayers[sport==="basketball"?"NBA":"NFL"];let seeded=teamMap&&teamMap[favorite];if(!seeded){const pool=leaguePlayerPools[currentLeague]||sports[sport].players;seeded=pool.slice(0,sport==="soccer"?11:sport==="baseball"?9:5).map(p=>p.slice(0,5))}if(!seeded||!seeded.length)return;const current=roster.filter(p=>p.sport===sport&&(p.league||currentLeague)===currentLeague);if(current.some(p=>p.team===favorite)&&!force)return;if(force){roster=roster.filter(p=>!(p.sport===sport&&(p.league||currentLeague)===currentLeague));save();saveLineup([])}seeded.forEach(a=>{if(roster.some(p=>p.sport===sport&&(p.league||currentLeague)===currentLeague&&p.name===a[0]&&p.team===favorite))return;roster.push({name:a[0],pos:a[1],sport,rating:a[2],age:a[3]||24,potential:Math.min(99,a[2]+((a[3]||24)<=24?7:3)),nation:a[4]||"International",league:currentLeague,team:favorite,salary:Math.max(1,Math.round((Number(a[2]||70)-55)*.65+2)),source:"team roster",gamesTracked:0,form:50,fatigue:0,injuryGames:0,stats:{games:0,points:0,goals:0,assists:0,rebounds:0,steals:0,blocks:0,passingYards:0,touchdowns:0,rushingYards:0,receivingYards:0,tackles:0,sacks:0,hits:0,homeRuns:0,rbi:0,strikeouts:0,saves:0}});autoAddToLineup(roster[roster.length-1])});save()}
+async function loadSelectedTeamRealRoster(){
+ const path=espnLeaguePaths[currentLeague],key=favorite,league=currentLeague;
+ if(!path)return false;
+ const base="https://site.api.espn.com/apis/site/v2/sports/"+path;
+ const norm=x=>String(x||"").toLowerCase().normalize("NFD").replace(/[\\u0300-\\u036f]/g,"").replace(/&/g,"and").replace(/[^a-z0-9]+/g," ").trim();
+ const aliases={
+  "LA Clippers":["Los Angeles Clippers"],"St. Louis CITY SC":["St Louis City SC","St. Louis City"],
+  "New York City FC":["New York City"],"Inter Miami CF":["Inter Miami"],
+  "Sporting Kansas City":["Sporting KC"],"Athletic Club":["Athletic Bilbao"],
+  "Paris Saint-Germain":["Paris Saint Germain","PSG"],"Bayern Munich":["FC Bayern Munich"],
+  "Internazionale":["Inter Milan"],"AS Roma":["Roma"],"AC Milan":["Milan"]
+ };
+ const unpackTeams=d=>{
+  const out=[];
+  const walk=x=>{if(Array.isArray(x)){x.forEach(walk);return}if(!x||typeof x!=="object")return;
+   if(x.team&&typeof x.team==="object"&&(x.team.id||x.team.abbreviation||x.team.displayName)){out.push(x.team);return}
+   if(x.id&& (x.displayName||x.name||x.abbreviation)){out.push(x);return}
+   Object.values(x).forEach(v=>{if(v&&typeof v==="object")walk(v)});
+  };walk(d);return out;
+ };
+ const unpackAthletes=d=>{
+  const out=[];
+  const walk=x=>{if(Array.isArray(x)){x.forEach(walk);return}if(!x||typeof x!=="object")return;
+   if(x.items&&Array.isArray(x.items)){walk(x.items);return}
+   if((x.displayName||x.fullName||x.full_name)&&!x.position?.items){out.push(x);return}
+   if(x.athletes)walk(x.athletes);
+  };walk(d.athletes||d.team?.athletes||d);return out;
+ };
+ try{
+  const teamsRes=await fetch(base+"/teams?limit=1000");
+  if(!teamsRes.ok)throw Error("Team directory HTTP "+teamsRes.status);
+  const teamJson=await teamsRes.json(),teams=unpackTeams(teamJson);
+  const targetNames=[key,...(aliases[key]||[])].map(norm).filter(Boolean);
+  let match=teams.find(t=>targetNames.includes(norm(t.displayName))||targetNames.includes(norm(t.name))||targetNames.includes(norm(t.shortDisplayName)));
+  if(!match){
+   const target=norm(key),targetWords=target.split(" ").filter(w=>w.length>2);
+   let best=null,bestScore=0;
+   for(const t of teams){
+    const names=[t.displayName,t.name,t.shortDisplayName,t.nickname,t.location].map(norm);
+    const score=Math.max(0,...names.map(n=>{const words=n.split(" ").filter(w=>w.length>2);return words.length?targetWords.filter(w=>words.includes(w)).length/Math.max(targetWords.length,words.length):0}));
+    if(score>bestScore){best=t;bestScore=score}
+   }
+   if(bestScore>=0.75)match=best;
+  }
+  if(!match)throw Error("Team not found in ESPN directory");
+  let rosterData=null;
+  for(const id of [match.id,match.abbreviation,match.slug].filter(Boolean)){
+   try{const res=await fetch(base+"/teams/"+encodeURIComponent(id)+"/roster");if(!res.ok)continue;const d=await res.json();const players=unpackAthletes(d);if(players.length){rosterData=players;break}}catch(e){}
+  }
+  if(!rosterData?.length)throw Error("No players returned for "+key);
+  if(key!==favorite||league!==currentLeague||path!==espnLeaguePaths[currentLeague])return false;
+  const seen=new Set();
+  const players=rosterData.filter(a=>{const n=a.displayName||a.fullName||a.full_name;const k=norm(n);if(!k||seen.has(k))return false;seen.add(k);return true});
+  if(!players.length)throw Error("Roster contained no named players");
+  roster=roster.filter(p=>!(p.sport===sport&&(p.league||currentLeague)===currentLeague));
+  saveLineup([]);
+  players.forEach(a=>{
+   const name=a.displayName||a.fullName||a.full_name;if(!name)return;
+   const pos=typeof a.position==="string"?a.position:(a.position?.abbreviation||a.position?.displayName||"Player");
+   const age=Number(a.age)||24;
+   const raw=Number(a.overall||a.rating||a.statistics?.overall?.value);
+   const rating=Number.isFinite(raw)&&raw>0?Math.max(45,Math.min(99,Math.round(raw))):Math.max(55,Math.min(88,70+(age<=23?2:age>=32?-3:0)));
+   roster.push({name,pos,sport,rating,age,potential:Math.min(99,rating+(age<=24?8:3)),nation:"—",league:currentLeague,team:favorite,salary:Math.max(1,Math.round((rating-55)*.65+2)),source:"ESPN roster",espnId:a.id||null,gamesTracked:0,form:50,fatigue:0,injuryGames:0,stats:{games:0,points:0,goals:0,assists:0,rebounds:0,steals:0,blocks:0,passingYards:0,touchdowns:0,rushingYards:0,receivingYards:0,tackles:0,sacks:0,hits:0,homeRuns:0,rbi:0,strikeouts:0,saves:0}});
+  });
+  save();renderRoster();renderPlayers();renderStartingXI();renderBudget();renderSeason();
+  const note=$("team-roster-note");if(note)note.textContent="Loaded "+players.length+" real roster entries for "+favorite+" from ESPN.";
+  return true;
+ }catch(e){
+  const note=$("team-roster-note");if(note)note.textContent="Could not load a verified live roster for "+key+". No generic players were substituted. Try again in a moment.";
+  return false;
+ }
+}
+function seedRealTeamRoster(force=false){
+ const teamMap=realTeamPlayers[currentLeague]||{};
+ const seeded=teamMap[favorite];
+ if(!seeded||!seeded.length)return;
+ const current=roster.filter(p=>p.sport===sport&&(p.league||currentLeague)===currentLeague);
+ if(current.some(p=>p.team===favorite)&&!force)return;
+ if(force){roster=roster.filter(p=>!(p.sport===sport&&(p.league||currentLeague)===currentLeague));save();saveLineup([])}
+ seeded.forEach(a=>{
+  if(roster.some(p=>p.sport===sport&&(p.league||currentLeague)===currentLeague&&p.name===a[0]&&p.team===favorite))return;
+  roster.push({name:a[0],pos:a[1],sport,rating:a[2],age:a[3]||24,potential:Math.min(99,a[2]+((a[3]||24)<=24?7:3)),nation:a[4]||"International",league:currentLeague,team:favorite,salary:Math.max(1,Math.round((Number(a[2]||70)-55)*.65+2)),source:"team roster",gamesTracked:0,form:50,fatigue:0,injuryGames:0,stats:{games:0,points:0,goals:0,assists:0,rebounds:0,steals:0,blocks:0,passingYards:0,touchdowns:0,rushingYards:0,receivingYards:0,tackles:0,sacks:0,hits:0,homeRuns:0,rbi:0,strikeouts:0,saves:0}});
+  autoAddToLineup(roster[roster.length-1]);
+ });
+ save();
+}
 function startNextCareerSeason(team){const d=seasonData(),history=getCareerHistory(),mine=d.standings.find(t=>t.name===favorite),champ=(d.playoffs||[]).slice(-1)[0]?.games?.[0]?.winner||"No champion";history.unshift({sport,league:currentLeague,team:favorite,year:d.year,record:mine?mine.w+"-"+mine.l+(mine.d?"-"+mine.d:""):"0-0",rank:mine?d.standings.slice().sort((a,b)=>b.pts-a.pts||b.w-a.w).findIndex(t=>t.name===favorite)+1:null,champion:champ,contract:team===favorite?"Extended":"Left after season"});saveCareerHistory(history.slice(0,100));seasonAgeAndDevelopment();if(team&&team!==favorite){favorite=team;localStorage.setItem("draftlab-favorite-"+sport+"-"+currentLeague,team);localStorage.setItem("draftlab-favorite",team);const keep=roster.filter(p=>!(p.sport===sport&&(p.league||currentLeague)===currentLeague));roster=keep;save();lineups[lineupKey()]=[];saveLineup([]);initFavorite();seedRealTeamRoster()}seasonState[sport+"|"+currentLeague]={year:d.year+1,games:[],standings:[],round:0,schedule:[],trophies:d.trophies||[],awards:[]};localStorage.setItem("draftlab-season",JSON.stringify(seasonState));closeSeasonRecap();renderRoster();renderPlayers();renderStartingXI();renderSeason();toast(team&&team!==history[0]?.team?"NEW CHAPTER · "+team:"CONTRACT EXTENDED · "+favorite)}
 function closeSeasonRecap(){const m=$("season-recap-modal");if(m){m.classList.add("hidden");m.setAttribute("aria-hidden","true")}}
 function showSeasonRecap(){const d=seasonData();if(d.round<seasonLength()||d.recapShown)return;const mine=d.standings.find(t=>t.name===favorite),rank=d.standings.slice().sort((a,b)=>b.pts-a.pts||b.w-a.w).findIndex(t=>t.name===favorite)+1,champ=(d.playoffs||[]).slice(-1)[0]?.games?.[0]?.winner||"—",m=$("season-recap-modal");if(!m)return;$("recap-title").textContent=d.year+" SEASON REVIEW";$("recap-team").textContent=favorite+" · "+currentLeague;$("recap-record").textContent=mine?(mine.w+"–"+mine.l+(mine.d?"–"+mine.d:"")):"—";$("recap-rank").textContent=rank?("#"+rank+" of "+d.standings.length):"—";$("recap-champion").textContent=champ;$("recap-highlights").innerHTML='<div class="award-card"><div class="award-icon">🏆</div><div><strong>League champion</strong><small>'+esc(champ)+'</small></div></div>'+((d.awards||[]).slice(0,3).map(a=>'<div class="award-card"><div class="award-icon">'+esc(a.icon||"★")+'</div><div><strong>'+esc(a.title)+'</strong><small>'+esc(a.winner)+' · '+esc(a.detail)+'</small></div></div>').join(""));const teams=(leagueSets[sport].find(x=>x[0]===currentLeague)||leagueSets[sport][0]).slice(1).filter(t=>t!==favorite);$("recap-job-offers").innerHTML=teams.slice().sort((a,b)=>Math.abs(teamStrength(b)-75)-Math.abs(teamStrength(a)-75)).slice(0,5).map(t=>'<button class="job-offer" data-job="'+esc(t)+'"><strong>'+esc(t)+'</strong><small>'+teamStrength(t)+' OVR · New manager opportunity</small></button>').join("");d.recapShown=true;saveSeason(d);m.classList.remove("hidden");m.setAttribute("aria-hidden","false")}
